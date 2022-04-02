@@ -1,4 +1,4 @@
-#include "../include/BESO.h"
+#include "BESO.h"
 
 BESO::BESO(int nelx, int nely, double rmin, double vf, double ert, int maxIter)
 {
@@ -41,6 +41,7 @@ BESO::BESO(int nelx, int nely, double rmin, double vf, double ert, int maxIter)
     cout<<"Prepare Flt..."<<endl;
 
     // init opt paras
+    compliance = 0.0;
     delta = 1.0;
     iter = 0;
     vol = 1.0;
@@ -49,92 +50,48 @@ BESO::BESO(int nelx, int nely, double rmin, double vf, double ert, int maxIter)
 
 void BESO::Optimize()
 {
-//    if (delta > 0.001 && iter < maxIter)
-//    {
-//        cout<<"====================== Iter: " + to_string(iter) + " ======================" + '\n'<<endl;
-//        iter += 1;
-//        vol = max(vf, vol * (1.0 - ert));
-//
-//        // run finite element analysis
-//        FE();
-//#region Prepare report
-//        optInfo.Append("FEA:" + stopwatch.Elapsed.TotalMilliseconds + '\n');
-//#endregion
-//
-//#region Get DC
-//        stopwatch.Restart();
-//        GetDc();
-//        HistoryC.Add(Compliance);
-//        stopwatch.Stop();
-//#endregion
-//#region Prepare report
-//        optInfo.Append("Getting Sensitivity:" + stopwatch.Elapsed.TotalMilliseconds + '\n');
-//#endregion
-//
-//#region Flt
-//        stopwatch.Restart();
-//        Flt(dc.Length, dc, sh);
-//
-//        if (iter > 1)
-//            for (int j = 0; j < nely; j++)
-//            {
-//                for (int i = 0; i < nelx; i++)
-//                {
-//                    dc[i * nely + j] = (dc[i * nely + j] + dc_old[i * nely + j]) * 0.5;
-//                }
-//            }
-//
-//        // Record the sensitiveies in each step
-//        dc_old = (double[])dc.Clone();
-//        stopwatch.Stop();
-//#endregion
-//#region Prepare report
-//        optInfo.Append("Flt:" + stopwatch.Elapsed.TotalMilliseconds + '\n');
-//#endregion
-//
-//#region ADD & DEL
-//        stopwatch.Restart();
-//        ADD_DEL(vol);
-//        stopwatch.Stop();
-//#endregion
-//#region Prepare report
-//        optInfo.Append("ADD & DEL:" + stopwatch.Elapsed.TotalMilliseconds + '\n');
-//#endregion
-//
-//
-//#region Checking Convergence
-//        stopwatch.Restart();
-//
-//        // Check convergence
-//        if (iter > 10)
-//        {
-//            var newV = 0.0;
-//            var lastV = 0.0;
-//            for (int i = 1; i < 6; i++)
-//            {
-//                newV += HistoryC[HistoryC.Count - i];
-//                lastV += HistoryC[HistoryC.Count - 5 - i];
-//            }
-//            delta = Math.Abs((newV - lastV) / lastV);
-//        }
-//#endregion
-//#region Prepare report
-//        optInfo.Append("Checking Convergence:" + stopwatch.Elapsed.TotalMilliseconds + '\n');
-//
-//        optInfo.Append("Volume: " + vol.ToString() + '\n');
-//        optInfo.Append("Compliance: " + Compliance.ToString() + '\n');
-//        optInfo.Append("Change: " + delta.ToString() + '\n');
-//#endregion
-//
-//        info = "Iter: " + iter.ToString() + ", Volume: " + vol.ToString()
-//               + ", Compliance: " + Compliance.ToString() + ", Change: " + delta.ToString();
-//    }
-//    else
-//    {
-//        convergence = true;
-//    }
-//
-//    FreeAll();
+    if (delta > 0.001 && iter < maxIter)
+    {
+        cout<<"====================== Iter: " + to_string(iter) + " ======================" + '\n'<<endl;
+        iter += 1;
+        vol = max(vf, vol * (1.0 - ert));
+
+        // run finite element analysis
+        FE();
+        GetDc();
+        HistoryC.emplace_back(compliance);
+        Flt();
+        if (iter > 1)
+            for (int j = 0; j < nely; j++)
+            {
+                for (int i = 0; i < nelx; i++)
+                {
+                    dc[i * nely + j] = (dc[i * nely + j] + dc_old[i * nely + j]) * 0.5;
+                }
+            }
+        // Record the sensitiveies in each step
+        dc_old = dc;
+        ADD_DEL(vol);
+        // Check convergence
+        if (iter > 10)
+        {
+            double newV = 0.0;
+            double lastV = 0.0;
+            for (int i = 1; i < 6; i++)
+            {
+                newV += HistoryC[HistoryC.size() - i];
+                lastV += HistoryC[HistoryC.size() - 5 - i];
+            }
+            delta = abs((newV - lastV) / lastV);
+        }
+        cout<<"Iter: " << iter << ", Volume: " << vol << ", Compliance: " << compliance << ", Change: " << delta <<endl;
+    }
+    else
+    {
+        convergence = true;
+    }
+
+    FreeAll();
 }
 
 void BESO::PreFE()
@@ -195,10 +152,10 @@ void BESO::PreFlt() {
     int rminf = (int)floor(rmin) - 1;
 
     int length = (int)(nelx * nely * pow((2 * rminf + 1), 2));
-    int *ih = new int[length];
-    int *jh = new int[length];
-    auto *vh = new double[length];
-    sh = new double[nelx * nely];
+    int ih[length];
+    int jh[length];
+    double vh[length];
+    sh.resize(nelx * nely);
 
     int sum = 0;
     for (int i = 0; i < nelx; i++)
@@ -223,147 +180,156 @@ void BESO::PreFlt() {
     // get the sum of each row
     vector<Triplet<double>> triplets;
     for (size_t i = 0; i < sum; i++)
-        triplets.push_back(Triplet<double>(ih[i], jh[i], vh[i]));
+        triplets.emplace_back(ih[i], jh[i], vh[i]);
     FltM.resize(nelx * nely, nelx * nely);
     FltM.setFromTriplets(triplets.begin(), triplets.end());
     VectorXd result = FltM * VectorXd::Ones(FltM.cols());
-
-    VectorXd::Map(sh, result.rows()) = result;
-
-    delete []ih;
-    delete []jh;
-    delete []vh;
+    VectorXd::Map(sh.data(), result.rows()) = result;
 }
 
 
-void BESO::ADD_DEL(double volfra) {
-
+void BESO::ADD_DEL(double volfra)
+{
+    auto lowest = min_element(dc.data(),dc.data()+dc.size());
+    auto highest = max_element(dc.data(),dc.data()+dc.size());
+    double th = 0.0;
+    double _vol = volfra * nelx * nely;
+    while (((highest[0] - lowest[0]) / highest[0]) > 1e-5)
+    {
+        th = (highest[0] + lowest[0]) * 0.5;
+        double sum = 0.0;
+        for (int j = 0; j < nely; j++)
+        {
+            for (int i = 0; i < nelx; i++)
+            {
+                Xe(j, i) = dc(i * nely + j) > th ? 1.0 : Xmin;
+                sum += Xe(j, i);
+            }
+        }
+        if (sum - _vol > 0.0) lowest[0] = th;
+        else highest[0] = th;
+    }
 }
 
-void BESO::GetDc() {
+void BESO::GetDc()
+{
+    compliance = 0.0;
+    for (int ely = 0; ely < nely; ely++)
+    {
+        for (int elx = 0; elx < nelx; elx++)
+        {
+            auto n1 = (nely + 1) * elx + ely + 1;
+            auto n2 = (nely + 1) * (elx + 1) + ely + 1;
 
+            VectorXd Ue(8);
+            Ue <<  U[2 * n1 - 2], U[2 * n1 - 1], U[2 * n2 - 2], U[2 * n2 - 1],
+                            U[2 * n2], U[2 * n2 + 1], U[2 * n1], U[2 * n1 + 1];
+            double v = (Ue.transpose() * Ke * Ue).value();
+            compliance += 0.5 * pow(Xe(ely, elx), p) * v;
+            dc[elx * nely + ely] = 0.5 * pow(Xe(ely, elx), p - 1) * v;
+        }
+    }
 }
 
-//void BESO::FE()
-//{
-//    int num_allDofs = 2 * (nelx + 1) * (nely + 1);
-//    int num_fixedDofs = 2 * (nely + 1);
-//    int num_freeDofs = num_allDofs - num_fixedDofs;
-//
-//    // Assemble stiffness matrix with all DOFs
-//    vk = new double[64 * nelx * nely];
-//    for (int i = 0; i < nelx; i++)
-//    {
-//        for (int j = 0; j < nely; j++)
-//        {
-//            auto ex = pow(Xe[j, i], p);
-//            for (int a = 0; a < 8; a++)
-//            {
-//                for (int b = 0; b < 8; b++)
-//                {
-//                    vk[i * nely * 64 + j * 64 + a * 8 + b] = ex * Ke[a * 8 + b];
-//                }
-//            }
-//        }
-//    }
-//
-//    auto F = new double[num_allDofs];
-//    U = new double[num_allDofs];
-//
-//    // Define force vector
-//    F[2 * (nelx + 1) * (nely + 1) - nely - 1] = -1.0;
-//
-//    if (changeSupports)
-//    {
-//        // Define fixed dofs
-//        var fixed_dofs = new int[num_fixedDofs];
-//        for (int i = 0; i < num_fixedDofs; i++)
-//            fixed_dofs[i] = i;
-//
-//        var all_dofs = new int[num_allDofs];
-//        for (int i = 0; i < num_allDofs; i++)
-//            all_dofs[i] = i;
-//
-//        // Obtain free dofs
-//        free_dofs = all_dofs.Except(fixed_dofs).ToArray();
-//        changeSupports = false;
-//    }
-//
-//    var U_freedof = new double[num_freeDofs];
-//    Assembly_Solve(num_freeDofs, num_allDofs, ik.Length, free_dofs, ik, jk, vk, F, U_freedof);
-//
-//    for (int i = 0; i < num_freeDofs; i++)
-//    {
-//        U[free_dofs[i]] = U_freedof[i];
-//    }
-//}
+void BESO::FE()
+{
+    int num_allDofs = 2 * (nelx + 1) * (nely + 1);
+    int num_fixedDofs = 2 * (nely + 1);
+    int num_freeDofs = num_allDofs - num_fixedDofs;
 
+    // Assemble stiffness matrix with all DOFs
+    vk = new double[64 * nelx * nely];
+    for (int i = 0; i < nelx; i++)
+    {
+        for (int j = 0; j < nely; j++)
+        {
+            auto ex = pow(Xe(j, i), p);
+            for (int a = 0; a < 8; a++)
+            {
+                for (int b = 0; b < 8; b++)
+                {
+                    vk[i * nely * 64 + j * 64 + a * 8 + b] = ex * Ke(a * 8 + b);
+                }
+            }
+        }
+    }
 
-//
-//void BESO::Assembly_Solve(int num_freeDofs, int num_allDofs, int num_triplets, int* free_dofs, int* ik, int* jk, double* vk, double* F, double* U)
-//{
-//    std::vector<Triplet<double>> triplets;
-//    triplets.reserve(num_triplets);
-//
-//    for (int i = 0; i < num_triplets; i++)
-//    {
-//        triplets.push_back(Triplet<double>(ik[i], jk[i], vk[i]));
-//    }
-//
-//    SparseMatrix<double> K(num_allDofs, num_allDofs);
-//    K.setFromTriplets(triplets.begin(), triplets.end());
-//
-//    std::vector<Triplet<double>> P_triplets;
-//    P_triplets.reserve(num_freeDofs);
-//
-//    for (int i = 0; i < num_freeDofs; i++)
-//    {
-//        P_triplets.push_back(Triplet<double>(i, free_dofs[i], 1.0));
-//    }
-//
-//    SparseMatrix<double> P(num_freeDofs, num_allDofs);
-//    P.setFromTriplets(P_triplets.begin(), P_triplets.end());
-//
-//    SparseMatrix<double> K_freedof = P * K * P.transpose();
-//    // saveMarket(K_freedof, "E:/test/K_freedof_cpp.mtx");
-//
-//    VectorXd F_freedof(num_freeDofs);
-//    for (int i = 0; i < num_freeDofs; i++)
-//    {
-//        F_freedof(i) = F[free_dofs[i]];
-//    }
-//
-//    VectorXd result;
-//
-//    //PardisoLLT<Eigen::SparseMatrix<double>> llt(K_freedof);
-//    //llt.pardisoParameterArray()[59] = 0;
-//    //mkl_set_num_threads(1);
-//    //CholmodSimplicialLLT<Eigen::SparseMatrix<double>> llt(K_freedof);
-//    //CholmodSupernodalLLT<Eigen::SparseMatrix<double>> llt(K_freedof);
-//    SimplicialLLT<Eigen::SparseMatrix<double>> llt(K_freedof);
-//    llt.analyzePattern(K_freedof);
-//    llt.factorize(K_freedof);
-//    result = llt.solve(F_freedof);
-//    Eigen::VectorXd::Map(U, result.rows()) = result;
-//}
-//
-//double TransposeMultiply(int rows, int cols, double* A, double* U)
-//{
-//    Map<Matrix<double,Dynamic,Dynamic,RowMajor>> A_(A, rows,cols);
-//    Map<VectorXd> U_(U, rows);
-//    auto result = U_.transpose() * A_ * U_;
-//    return result.value();
-//}
-//
+    F.resize(num_allDofs);
+    U.resize(num_allDofs);
 
-//
-//void BESO::Flt(int dc_length, double* dc, double* sh)
-//{
-//    Map<VectorXd> dc_(dc, dc_length);
-//    Map<VectorXd> sh_(sh, dc_length);
-//    VectorXd result = (H.selfadjointView<Lower>() * dc_).array() / sh_.array();
-//    Eigen::VectorXd::Map(dc, result.rows()) = result;
-//}
+    // Define force vector
+    F(2 * (nelx + 1) * (nely + 1) - nely - 1) = -1.0;
+
+    // Define fixed dofs
+    VectorXi fixed_dofs(num_fixedDofs),all_dofs(num_allDofs);
+    for (int i = 0; i < num_fixedDofs; i++)
+        fixed_dofs[i] = i;
+
+    for (int i = 0; i < num_allDofs; i++)
+        all_dofs[i] = i;
+
+    // Obtain free dofs (get the difference)
+    free_dofs.resize(num_allDofs);
+    auto it = set_difference(all_dofs.data(), all_dofs.data() + all_dofs.size(),
+                   fixed_dofs.data(),fixed_dofs.data()+fixed_dofs.size(),
+                   free_dofs.data());
+
+    free_dofs.conservativeResize(std::distance(free_dofs.data(), it)); // resize the result
+
+    // Assemble the global stiffness matrix
+    VectorXd U_freedof(num_freeDofs);
+
+    std::vector<Triplet<double>> triplets;
+    int num_triplets = nelx * nely * 64;
+    triplets.reserve(num_triplets);
+
+    for (int i = 0; i < num_triplets; i++)
+    {
+        triplets.emplace_back(ik[i], jk[i], vk[i]);
+    }
+
+    SparseMatrix<double> K(num_allDofs, num_allDofs);
+    K.setFromTriplets(triplets.begin(), triplets.end());
+
+    std::vector<Triplet<double>> P_triplets;
+    P_triplets.reserve(num_freeDofs);
+
+    for (int i = 0; i < num_freeDofs; i++)
+    {
+        P_triplets.emplace_back(i, free_dofs[i], 1.0);
+    }
+
+    SparseMatrix<double> P(num_freeDofs, num_allDofs);
+    P.setFromTriplets(P_triplets.begin(), P_triplets.end());
+
+    SparseMatrix<double> K_freedof = P * K * P.transpose();
+    // saveMarket(K_freedof, "E:/test/K_freedof_cpp.mtx");
+
+    VectorXd F_freedof(num_freeDofs);
+    for (int i = 0; i < num_freeDofs; i++)
+    {
+        F_freedof(i) = F[free_dofs[i]];
+    }
+
+    // Solve FEM
+    VectorXd result;
+    SimplicialLLT<Eigen::SparseMatrix<double>> llt(K_freedof);
+    llt.analyzePattern(K_freedof);
+    llt.factorize(K_freedof);
+    result = llt.solve(F_freedof);
+    VectorXd::Map(U_freedof.data(), result.rows()) = result;
+
+    for (int i = 0; i < num_freeDofs; i++)
+    {
+        U[free_dofs[i]] = U_freedof[i];
+    }
+}
+
+void BESO::Flt()
+{
+    VectorXd result = (FltM.selfadjointView<Lower>() * dc).array() / sh.array();
+    Eigen::VectorXd::Map(dc.data(), result.rows()) = result;
+}
 
 void BESO::GetKe()
 {
@@ -372,24 +338,23 @@ void BESO::GetKe()
     double w = E / (1 - nu * nu);
     double k[8] =
             {
-                    w * (0.5 - nu / 6.0), w * (0.125 + nu / 8.0), w * (-0.25 - nu / 12.0), w * (-0.125 + 3 * nu / 8.0),
-                    w * (-0.25 + nu / 12.0), w * (-0.125 - nu / 8.0), w * (nu / 6.0), w * (0.125 - 3 * nu / 8.0)
+                w * (0.5 - nu / 6.0), w * (0.125 + nu / 8.0), w * (-0.25 - nu / 12.0), w * (-0.125 + 3 * nu / 8.0),
+                w * (-0.25 + nu / 12.0), w * (-0.125 - nu / 8.0), w * (nu / 6.0), w * (0.125 - 3 * nu / 8.0)
             };
     Ke <<
        k[0],k[1],k[2],k[3],k[4],k[5],k[6],k[7],
-            k[1],k[0],k[7],k[6],k[5],k[4],k[3],k[2],
-            k[2],k[7],k[0],k[5],k[6],k[3],k[4],k[1],
-            k[3],k[6],k[5],k[0],k[7],k[2],k[1],k[4],
-            k[4],k[5],k[6],k[7],k[0],k[1],k[2],k[3],
-            k[5],k[4],k[3],k[2],k[1],k[0],k[7],k[6],
-            k[6],k[3],k[4],k[1],k[2],k[7],k[0],k[5],
-            k[7],k[2],k[1],k[4],k[3],k[6],k[5],k[0];
+       k[1],k[0],k[7],k[6],k[5],k[4],k[3],k[2],
+       k[2],k[7],k[0],k[5],k[6],k[3],k[4],k[1],
+       k[3],k[6],k[5],k[0],k[7],k[2],k[1],k[4],
+       k[4],k[5],k[6],k[7],k[0],k[1],k[2],k[3],
+       k[5],k[4],k[3],k[2],k[1],k[0],k[7],k[6],
+       k[6],k[3],k[4],k[1],k[2],k[7],k[0],k[5],
+       k[7],k[2],k[1],k[4],k[3],k[6],k[5],k[0];
 }
 
 void BESO::FreeAll()
 {
     delete []ik;
     delete []jk;
-    delete []sh;
     delete []vk;
 }
