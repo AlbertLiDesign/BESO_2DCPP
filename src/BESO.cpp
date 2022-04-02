@@ -90,8 +90,6 @@ void BESO::Optimize()
     {
         convergence = true;
     }
-
-    FreeAll();
 }
 
 void BESO::PreFE()
@@ -303,7 +301,7 @@ void BESO::FE()
     P.setFromTriplets(P_triplets.begin(), P_triplets.end());
 
     SparseMatrix<double> K_freedof = P * K * P.transpose();
-    // saveMarket(K_freedof, "E:/test/K_freedof_cpp.mtx");
+    //saveMarket(K_freedof, "K_freedof_cpp.mtx");
 
     VectorXd F_freedof(num_freeDofs);
     for (int i = 0; i < num_freeDofs; i++)
