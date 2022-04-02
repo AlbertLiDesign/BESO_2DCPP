@@ -22,8 +22,6 @@ int main()
 
 ```
 
-- If you want to visualize it, please manually output design variables by access `beso.Xe`.
-
 ## References
 
 1. [CISM_BESO_2D](https://www.cism.org.au/tools)
